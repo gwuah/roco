@@ -13,11 +13,11 @@ func main() {
 		case <-t.C:
 			if counter == 10 {
 				fmt.Println("lost connection to pod")
-				return
+			} else {
+				fmt.Println("Handled connection for 9200:200")
 			}
-
-			fmt.Println("Handled connection for 9200:200")
 			counter++
+
 		}
 	}
 }
