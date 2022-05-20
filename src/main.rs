@@ -1,19 +1,22 @@
 use std::{
     env,
     io::{BufRead, BufReader},
-    process::{Command, Stdio},
+    process::{self, Command, Stdio},
     sync::mpsc,
     thread,
     time::Duration,
 };
 
-fn reconnection_required(output: &str) -> bool {
-    let lower = output.to_lowercase();
-    return lower.contains("lost connection to pod") || lower.contains("timeout");
-}
-
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
+
+    if args.len() == 0 {
+        println!(
+            "\x1b[93m{}\x1b[0m",
+            "yo, what am i supposed to be persisting??????"
+        );
+        process::exit(1)
+    }
 
     loop {
         let (tx, rx) = mpsc::channel::<String>();
@@ -29,14 +32,10 @@ fn main() {
         let mut stdout = child.stdout.take();
 
         thread::spawn(move || {
-            for line in BufReader::new(stderr.as_mut().unwrap()).lines() {
+            let err_stream = stderr.as_mut().unwrap();
+            for line in BufReader::new(err_stream).lines() {
                 let value = line.ok().unwrap();
-                if reconnection_required(&value) {
-                    tx.send(String::from(&value)).unwrap();
-                } else {
-                    println!("\x1b[93mFatal Error\x1b[0m - {}", &value);
-                    println!("\x1b[93mConnection can't be retried\x1b[0m");
-                }
+                tx.send(String::from(&value)).unwrap();
             }
         });
 
@@ -46,8 +45,11 @@ fn main() {
             }
         });
 
-        rx.recv().unwrap();
-        println!("broken pipe - establishing new connection in 500ms");
+        if let Some(value) = rx.recv().ok() {
+            println!("\x1b[93m{}\x1b[0m", value);
+        }
+
+        println!("previous pipe broken, creating new one in 500ms");
         thread::sleep(Duration::from_millis(500));
         child.kill().unwrap();
     }
