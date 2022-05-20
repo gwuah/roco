@@ -33,13 +33,10 @@ fn main() {
                 let value = line.ok().unwrap();
                 if reconnection_required(&value) {
                     tx.send(String::from(&value)).unwrap();
-                    break;
                 } else {
                     println!("\x1b[93mFatal Error\x1b[0m - {}", &value);
                     println!("\x1b[93mConnection can't be retried\x1b[0m");
-                    return;
                 }
-                println!("{}", line.ok().unwrap())
             }
         });
 
