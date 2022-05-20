@@ -1,7 +1,11 @@
-use std::env;
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
-use std::{thread, time::Duration};
+use std::{
+    env,
+    io::{BufRead, BufReader},
+    process::{Command, Stdio},
+    sync::mpsc,
+    thread,
+    time::Duration,
+};
 
 fn reconnection_required(output: &str) -> bool {
     let lower = output.to_lowercase();
@@ -12,6 +16,8 @@ fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
     loop {
+        let (tx, rx) = mpsc::channel::<String>();
+
         let mut child = Command::new(&args[0])
             .args(&args[1..])
             .stdout(Stdio::piped())
@@ -19,25 +25,33 @@ fn main() {
             .spawn()
             .expect("failed to execute command");
 
-        for line in BufReader::new(child.stderr.as_mut().unwrap()).lines() {
-            let value = line.ok().unwrap();
-            if reconnection_required(&value) {
-                println!("broken pipe - establishing new connection");
-                break;
-            } else {
-                println!("\x1b[93mFatal Error\x1b[0m - {}", &value);
-                println!("\x1b[93mConnection can't be retried\x1b[0m");
-                return;
-            }
-        }
+        let mut stderr = child.stderr.take();
+        let mut stdout = child.stdout.take();
 
+        thread::spawn(move || {
+            for line in BufReader::new(stderr.as_mut().unwrap()).lines() {
+                let value = line.ok().unwrap();
+                if reconnection_required(&value) {
+                    tx.send(String::from(&value)).unwrap();
+                    break;
+                } else {
+                    println!("\x1b[93mFatal Error\x1b[0m - {}", &value);
+                    println!("\x1b[93mConnection can't be retried\x1b[0m");
+                    return;
+                }
+                println!("{}", line.ok().unwrap())
+            }
+        });
+
+        thread::spawn(move || {
+            for line in BufReader::new(stdout.as_mut().unwrap()).lines() {
+                println!("{}", line.ok().unwrap())
+            }
+        });
+
+        rx.recv().unwrap();
+        println!("broken pipe - establishing new connection in 500ms");
         thread::sleep(Duration::from_millis(500));
         child.kill().unwrap();
     }
 }
-
-// E0417 12:59:21.114449   42312 portforward.go:340] error creating error stream for port 9200 -> 9200: Timeout occurred
-// E0417 12:59:21.114448   42312 portforward.go:340] error creating error stream for port 9200 -> 9200: Timeout occurred
-// E0417 13:01:01.211521   42312 portforward.go:233] lost connection to pod
-// "core-elasticsearch-es-default-0", "9200:9200",
-//./target/debug/ppf core-elasticsearch-es-default-0 9200:9200
